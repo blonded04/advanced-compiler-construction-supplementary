@@ -5,6 +5,8 @@
 #include "runtime.h"
 #include "gc.h"
 
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
 /** Total allocated number of bytes (over the entire duration of the program). */
 int total_allocated_bytes = 0;
 
@@ -24,16 +26,16 @@ int gc_roots_top = 0;
 void **gc_roots[MAX_GC_ROOTS];
 
 #ifndef MAX_ALLOC_SIZE
-#define MAX_ALLOC_SIZE (1024 * 1024)
+#define MAX_ALLOC_SIZE (50)
 #endif
 
 static char memory[2 * MAX_ALLOC_SIZE];
 
-static char *from_space = &memory;
-static char *to_space = &memory + MAX_ALLOC_SIZE;
-static char *scan = &memory + MAX_ALLOC_SIZE;
-static char *next = &memory + MAX_ALLOC_SIZE;
-static char *limit = &memory + 2 * MAX_ALLOC_SIZE;
+static char *from_space = memory;
+static char *to_space = memory + MAX_ALLOC_SIZE;
+static char *scan = memory + MAX_ALLOC_SIZE;
+static char *next = memory + MAX_ALLOC_SIZE;
+static char *limit = memory + 2 * MAX_ALLOC_SIZE;
 
 static void gc_out_of_memory_perror(const char* context) {
   fprintf(stderr, "\n=======================================================\n");
@@ -52,12 +54,12 @@ static void gc_chase(void *object) {
   stella_object* sobject = object;
 
   while (sobject) {
-    stella_object *fwd = next;
-    memcpy(fwd, sobject, sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(sobject->object_header) + 1));
-    next = next + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(sobject->object_header) + 1);
-    if (0 < next - limit) {
+    stella_object *fwd = (stella_object*)next;
+    if (limit < next + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(sobject->object_header) + 1)) {
       gc_out_of_memory_perror("chasing pointers next pointer overflow");
     }
+    memcpy(fwd, sobject, sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(sobject->object_header) + 1));
+    next = next + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(sobject->object_header) + 1);
 
     stella_object *candidate = NULL;
     for (size_t i = 0; i < STELLA_OBJECT_HEADER_FIELD_COUNT(sobject->object_header); i++) {
@@ -90,8 +92,7 @@ static void* gc_forward(void *object) {
 
 static void gc_deep_copy(stella_object* object) {
   for (int i = 0; i < STELLA_OBJECT_HEADER_FIELD_COUNT(object->object_header); i++) {
-    int field = 0;
-    object->object_fields[i] = forward(object->object_fields[i], &field);
+    object->object_fields[i] = gc_forward(object->object_fields[i]);
   }
 }
 
@@ -115,13 +116,13 @@ static void gc_flip(void) {
 
 void* gc_alloc(size_t size_in_bytes) {
   if (scan != next) {
-    gc_deep_copy(scan);
+    gc_deep_copy((stella_object*)scan);
     scan = scan + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
   }
 
   if (limit < next + size_in_bytes) {
     while (0 < next - scan) {
-      gc_deep_copy(scan);
+      gc_deep_copy((stella_object*)scan);
       scan = scan + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
     }
 
@@ -132,10 +133,10 @@ void* gc_alloc(size_t size_in_bytes) {
   }
 
   total_allocated_bytes += size_in_bytes;
-  max_allocated_bytes = max(total_allocated_bytes, max_allocated_bytes);
+  max_allocated_bytes = MAX(total_allocated_bytes, max_allocated_bytes);
 
   total_allocated_objects++;
-  max_allocated_objects = max(total_allocated_objects, max_allocated_objects);
+  max_allocated_objects = MAX(total_allocated_objects, max_allocated_objects);
 
   limit = limit - size_in_bytes;
   memset(limit, 0, size_in_bytes);
@@ -158,7 +159,7 @@ void print_gc_alloc_stats(void) {
 }
 
 static void stella_print_object(stella_object *object) {
-  printf("\tObject with %d fields at %p of kind %s:\n\t", 
+  printf("\tObject with %d fields at %p of kind %d:\n\t", 
     STELLA_OBJECT_HEADER_FIELD_COUNT(object->object_header), 
     object, 
     STELLA_OBJECT_HEADER_TAG(object->object_header));
@@ -228,7 +229,7 @@ static void print_to_space_state(void) {
   char* iterator = to_space;
 
   while (0 < next - iterator) {
-    print_to_space_object((stella_object*)iterator);
+    stella_print_object((stella_object*)iterator);
     iterator = (char*)iterator + sizeof(void*) * (1 + STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)iterator)->object_header));
   }
   while (0 < limit - iterator) {
@@ -236,7 +237,7 @@ static void print_to_space_state(void) {
     iterator = (char*)iterator + sizeof(void*);
   }
   while (iterator - to_space < MAX_ALLOC_SIZE) {
-    print_to_space_object((stella_object*)iterator);
+    stella_print_object((stella_object*)iterator);
     iterator = (char*)iterator + sizeof(void*) * (1 + STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)iterator)->object_header));
   }
 
@@ -274,7 +275,7 @@ void gc_write_barrier(void *object, int field_index, void *contents) {
   total_writes += 1;
 }
 
-void gc_push_root(void **ptr){
+void gc_push_root(void **ptr) {
   if (gc_roots_top > MAX_GC_ROOTS) {
     gc_out_of_memory_perror("TOO MUCH ROOTS");
   }
@@ -284,6 +285,6 @@ void gc_push_root(void **ptr){
   }
 }
 
-void gc_pop_root(void **ptr){
+void gc_pop_root(void **ptr) {
   gc_roots_top--;
 }
