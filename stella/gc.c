@@ -26,16 +26,17 @@ int gc_roots_top = 0;
 void **gc_roots[MAX_GC_ROOTS];
 
 #ifndef MAX_ALLOC_SIZE
-#define MAX_ALLOC_SIZE (50)
-#endif
+#define MAX_ALLOC_SIZE (2 * 1024 * 1024)
+#endif  // MAX_ALLOC_SIZE
 
-static char memory[2 * MAX_ALLOC_SIZE];
+// 4 * MAX_ALLOC_SIZE to avoid wild pointer comparisons which are UB by C ISO
+static char memory[4 * MAX_ALLOC_SIZE] __attribute__ ((aligned (sizeof(void*))));
 
-static char *from_space = memory;
-static char *to_space = memory + MAX_ALLOC_SIZE;
-static char *scan = memory + MAX_ALLOC_SIZE;
-static char *next = memory + MAX_ALLOC_SIZE;
-static char *limit = memory + 2 * MAX_ALLOC_SIZE;
+static char *from_space = memory + MAX_ALLOC_SIZE;
+static char *to_space = memory + 2 * MAX_ALLOC_SIZE;
+static char *scan = memory + 2 * MAX_ALLOC_SIZE;
+static char *next = memory + 2 * MAX_ALLOC_SIZE;
+static char *limit = memory + 3 * MAX_ALLOC_SIZE;
 
 static void gc_out_of_memory_perror(const char* context) {
   fprintf(stderr, "\n=======================================================\n");
@@ -79,6 +80,10 @@ static void gc_chase(void *object) {
 }
 
 static void* gc_forward(void *object) {
+  if (!object) {
+    return object;
+  }
+
   if (gc_object_space_test((stella_object*) object, from_space)) {
     if (!gc_object_space_test(((stella_object*) object)->object_fields[0], to_space)) {
       gc_chase(object);
@@ -115,6 +120,8 @@ static void gc_flip(void) {
 }
 
 void* gc_alloc(size_t size_in_bytes) {
+  size_in_bytes = ((size_in_bytes + sizeof(void*) - 1) / sizeof(void*)) * sizeof(void*);
+
   if (scan != next) {
     gc_deep_copy((stella_object*)scan);
     scan = scan + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
@@ -266,23 +273,22 @@ void print_gc_state(void) {
 }
 
 void gc_read_barrier(void *object, int field_index) {
-  total_reads += 1;
+  total_reads++;
 
   gc_forward(((stella_object*)object)->object_fields[field_index]);
 }
 
 void gc_write_barrier(void *object, int field_index, void *contents) {
-  total_writes += 1;
+  total_writes++;
 }
 
 void gc_push_root(void **ptr) {
   if (gc_roots_top > MAX_GC_ROOTS) {
-    gc_out_of_memory_perror("TOO MUCH ROOTS");
+    gc_out_of_memory_perror("too much roots");
   }
+
   gc_roots[gc_roots_top++] = ptr;
-  if (gc_roots_top > gc_roots_max_size) {
-    gc_roots_max_size = gc_roots_top; 
-  }
+  gc_roots_max_size = MAX(gc_roots_top, gc_roots_max_size); 
 }
 
 void gc_pop_root(void **ptr) {

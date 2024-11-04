@@ -1,2 +1,6 @@
 .vscode
 .history
+.gdb_history
+*.o
+*.out
+TEMPORARY_*
