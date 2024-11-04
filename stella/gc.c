@@ -122,15 +122,15 @@ static void gc_flip(void) {
 void* gc_alloc(size_t size_in_bytes) {
   size_in_bytes = ((size_in_bytes + sizeof(void*) - 1) / sizeof(void*)) * sizeof(void*);
 
-  if (scan != next) {
+  if (scan < next) {
     gc_deep_copy((stella_object*)scan);
-    scan = scan + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
+    scan += sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
   }
 
   if (limit < next + size_in_bytes) {
-    while (0 < next - scan) {
+    while (scan < next) {
       gc_deep_copy((stella_object*)scan);
-      scan = scan + sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
+      scan += sizeof(void*) * (STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)scan)->object_header) + 1);
     }
 
     gc_flip();
@@ -237,15 +237,15 @@ static void print_to_space_state(void) {
 
   while (0 < next - iterator) {
     stella_print_object((stella_object*)iterator);
-    iterator = (char*)iterator + sizeof(void*) * (1 + STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)iterator)->object_header));
+    iterator += sizeof(void*) * (1 + STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)iterator)->object_header));
   }
   while (0 < limit - iterator) {
     printf("\tNone: %p\n", iterator);
-    iterator = (char*)iterator + sizeof(void*);
+    iterator +=sizeof(void*);
   }
   while (iterator - to_space < MAX_ALLOC_SIZE) {
     stella_print_object((stella_object*)iterator);
-    iterator = (char*)iterator + sizeof(void*) * (1 + STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)iterator)->object_header));
+    iterator += sizeof(void*) * (1 + STELLA_OBJECT_HEADER_FIELD_COUNT(((stella_object*)iterator)->object_header));
   }
 
 }
