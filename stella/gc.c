@@ -283,6 +283,10 @@ void gc_write_barrier(void *object, int field_index, void *contents) {
 }
 
 void gc_push_root(void **ptr) {
+#if defined(STELLA_GC_STATS) && defined(STELLA_DEBUG)
+  print_gc_state();
+#endif  // defined(STELLA_GC_STATS) && defined(STELLA_DEBUG)
+
   if (gc_roots_top > MAX_GC_ROOTS) {
     gc_out_of_memory_perror("too much roots");
   }
